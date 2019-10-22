@@ -23,6 +23,7 @@ program cavity_flow
     type(LatticeD2Q9) :: fluid
     real(wp), allocatable :: density(:,:), velocity(:,:,:), old_vel(:,:,:)
     real(wp) :: tstart, tfin
+    integer :: itstart, itend, count_rate
     logical :: finish
 
     character(len=100) :: ctrl_file, output_folder
@@ -81,6 +82,7 @@ program cavity_flow
 
     
     call cpu_time(tstart)
+    call system_clock(itstart,count_rate=count_rate)
 
     ! set fluid to set_equilibrium
     call fluid%set_equilibrium(1.0_wp)
@@ -90,8 +92,8 @@ program cavity_flow
 
         ! COLLISION STEP
         ! call fluid%collide_and_stream_trt(omega_2)
-        !call fluid%collide_and_stream_risc()
-        call fluid%collide_and_stream()
+        call fluid%collide_and_stream_risc()
+        ! call fluid%collide_and_stream()
 
         ! set boundary conditions
         ulid = uwall*ramp_with_time(t,tf,2.0_wp)
@@ -124,7 +126,9 @@ program cavity_flow
     end do
 
     call cpu_time(tfin)
-    print *, "MLUPS = ", real(nx,wp)*real(ny,wp)*real(t,wp)/(tfin-tstart)/1.e6_wp
+    call system_clock(itend)
+    print *, "MLUPS cpu_time = ", real(nx,wp)*real(ny,wp)*real(t,wp)/(tfin-tstart)/1.e6_wp
+    print *, "MLUPS system_clock = ", real(nx,wp)*real(ny,wp)*real(t,wp)/(real(itend - itstart,wp)/real(count_rate,wp))/1.e6_wp
     
     ! get final results
     density = fluid%get_density_all()

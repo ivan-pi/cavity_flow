@@ -24,7 +24,6 @@ module d2q9_mod
         integer :: ny
         real(wp) :: omega
         real(wp) :: one_min_omega
-        real(wp) :: flag
         real(wp), pointer, contiguous  :: fpre(:,:,:) => null()
         real(wp), pointer, contiguous :: fpost(:,:,:) => null()
     contains
@@ -66,9 +65,6 @@ contains
             ! to storage arrays
         lattice%fpre => f1
         lattice%fpost => f2
-
-            ! set flag for pointer switch
-        lattice%flag = 0
     end function new_lattice
     
     !
@@ -104,113 +100,134 @@ contains
     !
     subroutine collide_and_stream(self)
         class(LatticeD2Q9), intent(inout) :: self
-        real(wp) :: rho, rhoinv, ux, uy, usqr, ne(0:8)
-        integer :: i, j
 
-        associate(fpre => self%fpre,fpost => self%fpost, omega => self%omega, one_min_omega => self%one_min_omega)
+        call cs_kernel(self%nx,self%ny,self%fpre,self%fpost,self%omega,self%one_min_omega)
+    
+    contains
 
-        do i = 1, self%nx
-            do j = 1, self%ny
-                    ! macroscopic variables
-                rho = sum(fpre(i,j,:))
-                rhoinv = 1.0_wp/rho
-                ux = rhoinv*(fpre(i,j,1)+fpre(i,j,5)+fpre(i,j,8)-fpre(i,j,3)-fpre(i,j,6)-fpre(i,j,7))
-                uy = rhoinv*(fpre(i,j,2)+fpre(i,j,5)+fpre(i,j,6)-fpre(i,j,4)-fpre(i,j,7)-fpre(i,j,8))
-                usqr = ux*ux + uy*uy
+        subroutine cs_kernel(nx,ny,fpre,fpost,omega,one_min_omega)
+            integer, intent(in) :: nx, ny
+            real(wp), intent(in) :: fpre(0:nx+1,0:ny+1,0:8)
+            real(wp), intent(out) :: fpost(0:nx+1,0:ny+1,0:8)
+            real(wp), intent(in) :: omega, one_min_omega
 
-                    ! non-equlibrium part of the distribution function
-                ne(0)  = 0.5_wp*w(0)*rho*(2.0_wp - inv_cs2*usqr)
-                ne(1)  = 0.5_wp*w(1)*rho*(2.0_wp + 2.0_wp*inv_cs2*ux + inv_cs4*ux*ux - inv_cs2*usqr)
-                ne(2)  = 0.5_wp*w(2)*rho*(2.0_wp + 2.0_wp*inv_cs2*uy + inv_cs4*uy*uy - inv_cs2*usqr)
-                ne(3)  = 0.5_wp*w(3)*rho*(2.0_wp - 2.0_wp*inv_cs2*ux + inv_cs4*ux*ux - inv_cs2*usqr)
-                ne(4)  = 0.5_wp*w(4)*rho*(2.0_wp - 2.0_wp*inv_cs2*uy + inv_cs4*uy*uy - inv_cs2*usqr)
-                ne(5)  =        w(5)*rho*(1.0_wp + inv_cs2*(ux + uy) + inv_cs4*ux*uy + inv_cs2*usqr)
-                ne(6)  =        w(6)*rho*(1.0_wp - inv_cs2*(ux - uy) - inv_cs4*ux*uy + inv_cs2*usqr)
-                ne(7)  =        w(7)*rho*(1.0_wp - inv_cs2*(ux + uy) + inv_cs4*ux*uy + inv_cs2*usqr)
-                ne(8)  =        w(8)*rho*(1.0_wp + inv_cs2*(ux - uy) - inv_cs4*ux*uy + inv_cs2*usqr)
+            real(wp) :: rho, rhoinv, ux, uy, usqr, ne(0:8)
+            integer :: i, j
 
-                    ! perform collide and stream
-                fpost(i,j,0)     = one_min_omega*fpre(i,j,0) + omega*ne(0)
-                fpost(i+1,j,1)   = one_min_omega*fpre(i,j,1) + omega*ne(1)
-                fpost(i,j+1,2)   = one_min_omega*fpre(i,j,2) + omega*ne(2)
-                fpost(i-1,j,3)   = one_min_omega*fpre(i,j,3) + omega*ne(3)
-                fpost(i,j-1,4)   = one_min_omega*fpre(i,j,4) + omega*ne(4)
-                fpost(i+1,j+1,5) = one_min_omega*fpre(i,j,5) + omega*ne(5)
-                fpost(i-1,j+1,6) = one_min_omega*fpre(i,j,6) + omega*ne(6)
-                fpost(i-1,j-1,7) = one_min_omega*fpre(i,j,7) + omega*ne(7)
-                fpost(i+1,j-1,8) = one_min_omega*fpre(i,j,8) + omega*ne(8)
+            !$omp parallel shared(fpost,fpre,omega,one_min_omega) private(j,i,rho,rhoinv,ux,uy,usqr,ne)
+            !$omp do schedule(static)
+            do i = 1, nx
+                do j = 1, ny
+                        ! macroscopic variables
+                    rho = sum(fpre(i,j,:))
+                    rhoinv = 1.0_wp/rho
+                    ux = rhoinv*(fpre(i,j,1)+fpre(i,j,5)+fpre(i,j,8)-fpre(i,j,3)-fpre(i,j,6)-fpre(i,j,7))
+                    uy = rhoinv*(fpre(i,j,2)+fpre(i,j,5)+fpre(i,j,6)-fpre(i,j,4)-fpre(i,j,7)-fpre(i,j,8))
+                    usqr = ux*ux + uy*uy
+
+                        ! non-equlibrium part of the distribution function
+                    ne(0)  = 0.5_wp*w(0)*rho*(2.0_wp - inv_cs2*usqr)
+                    ne(1)  = 0.5_wp*w(1)*rho*(2.0_wp + 2.0_wp*inv_cs2*ux + inv_cs4*ux*ux - inv_cs2*usqr)
+                    ne(2)  = 0.5_wp*w(2)*rho*(2.0_wp + 2.0_wp*inv_cs2*uy + inv_cs4*uy*uy - inv_cs2*usqr)
+                    ne(3)  = 0.5_wp*w(3)*rho*(2.0_wp - 2.0_wp*inv_cs2*ux + inv_cs4*ux*ux - inv_cs2*usqr)
+                    ne(4)  = 0.5_wp*w(4)*rho*(2.0_wp - 2.0_wp*inv_cs2*uy + inv_cs4*uy*uy - inv_cs2*usqr)
+                    ne(5)  =        w(5)*rho*(1.0_wp + inv_cs2*(ux + uy) + inv_cs4*ux*uy + inv_cs2*usqr)
+                    ne(6)  =        w(6)*rho*(1.0_wp - inv_cs2*(ux - uy) - inv_cs4*ux*uy + inv_cs2*usqr)
+                    ne(7)  =        w(7)*rho*(1.0_wp - inv_cs2*(ux + uy) + inv_cs4*ux*uy + inv_cs2*usqr)
+                    ne(8)  =        w(8)*rho*(1.0_wp + inv_cs2*(ux - uy) - inv_cs4*ux*uy + inv_cs2*usqr)
+
+                        ! perform collide and stream
+                    fpost(i,j,0)     = one_min_omega*fpre(i,j,0) + omega*ne(0)
+                    fpost(i+1,j,1)   = one_min_omega*fpre(i,j,1) + omega*ne(1)
+                    fpost(i,j+1,2)   = one_min_omega*fpre(i,j,2) + omega*ne(2)
+                    fpost(i-1,j,3)   = one_min_omega*fpre(i,j,3) + omega*ne(3)
+                    fpost(i,j-1,4)   = one_min_omega*fpre(i,j,4) + omega*ne(4)
+                    fpost(i+1,j+1,5) = one_min_omega*fpre(i,j,5) + omega*ne(5)
+                    fpost(i-1,j+1,6) = one_min_omega*fpre(i,j,6) + omega*ne(6)
+                    fpost(i-1,j-1,7) = one_min_omega*fpre(i,j,7) + omega*ne(7)
+                    fpost(i+1,j-1,8) = one_min_omega*fpre(i,j,8) + omega*ne(8)
+                end do
             end do
-        end do
-
-        end associate
+            !$omp end do
+            !$omp end parallel
+        end subroutine cs_kernel
     end subroutine collide_and_stream
 
 
     subroutine collide_and_stream_risc(self)
         class(LatticeD2Q9), intent(inout) :: self
-        real(wp) :: rho(self%nx), rhoinv, ux(self%nx), uy(self%nx), usqr(self%nx), ne(self%nx,0:8)
-        integer :: i, j
 
-        !$omp parallel shared(self) private(j,i,rho,rhoinv,ux,uy,usqr,ne)
-        associate(fpre => self%fpre,fpost => self%fpost, omega => self%omega, one_min_omega => self%one_min_omega)
+        call risc_kernel(self%nx,self%ny,self%fpre,self%fpost,self%omega,self%one_min_omega)
 
-        !$omp do schedule(static)
-        do j = 1, self%ny
-            do i = 1, self%nx
-                    ! macroscopic variables
-                rho(i) = sum(fpre(i,j,:))
-                rhoinv = 1.0_wp/rho(i)
-                ux(i) = rhoinv*(fpre(i,j,1)+fpre(i,j,5)+fpre(i,j,8)-fpre(i,j,3)-fpre(i,j,6)-fpre(i,j,7))
-                uy(i) = rhoinv*(fpre(i,j,2)+fpre(i,j,5)+fpre(i,j,6)-fpre(i,j,4)-fpre(i,j,7)-fpre(i,j,8))
-                usqr(i) = ux(i)*ux(i) + uy(i)*uy(i)
-            end do
+    contains 
 
-            do i = 1, self%nx
-                    ! non-equlibrium part of the distribution function
-                ne(i,0)  = 0.5_wp*w(0)*rho(i)*(2.0_wp - inv_cs2*usqr(i))
-                ne(i,1)  = 0.5_wp*w(1)*rho(i)*(2.0_wp + 2.0_wp*inv_cs2*ux(i) + inv_cs4*ux(i)*ux(i) - inv_cs2*usqr(i))
-                ne(i,2)  = 0.5_wp*w(2)*rho(i)*(2.0_wp + 2.0_wp*inv_cs2*uy(i) + inv_cs4*uy(i)*uy(i) - inv_cs2*usqr(i))
-                ne(i,3)  = 0.5_wp*w(3)*rho(i)*(2.0_wp - 2.0_wp*inv_cs2*ux(i) + inv_cs4*ux(i)*ux(i) - inv_cs2*usqr(i))
-                ne(i,4)  = 0.5_wp*w(4)*rho(i)*(2.0_wp - 2.0_wp*inv_cs2*uy(i) + inv_cs4*uy(i)*uy(i) - inv_cs2*usqr(i))
-                ne(i,5)  =        w(5)*rho(i)*(1.0_wp + inv_cs2*(ux(i) + uy(i)) + inv_cs4*ux(i)*uy(i) + inv_cs2*usqr(i))
-                ne(i,6)  =        w(6)*rho(i)*(1.0_wp - inv_cs2*(ux(i) - uy(i)) - inv_cs4*ux(i)*uy(i) + inv_cs2*usqr(i))
-                ne(i,7)  =        w(7)*rho(i)*(1.0_wp - inv_cs2*(ux(i) + uy(i)) + inv_cs4*ux(i)*uy(i) + inv_cs2*usqr(i))
-                ne(i,8)  =        w(8)*rho(i)*(1.0_wp + inv_cs2*(ux(i) - uy(i)) - inv_cs4*ux(i)*uy(i) + inv_cs2*usqr(i))
-            end do
+        subroutine risc_kernel(nx,ny,fpre,fpost,omega,one_min_omega)
+            integer, intent(in) :: nx, ny
+            real(wp), intent(in) :: fpre(0:nx+1,0:ny+1,0:8)
+            real(wp), intent(out) :: fpost(0:nx+1,0:ny+1,0:8)
+            real(wp), intent(in) :: omega, one_min_omega
 
-                    ! perform collide and stream
-            do i = 1, self%nx
-                fpost(i,j,0)     = one_min_omega*fpre(i,j,0) + omega*ne(i,0)
-            end do
-            do i = 1, self%nx
-                fpost(i+1,j,1)   = one_min_omega*fpre(i,j,1) + omega*ne(i,1)
-            end do
-            do i = 1, self%nx
-                fpost(i,j+1,2)   = one_min_omega*fpre(i,j,2) + omega*ne(i,2)
-            end do
-            do i = 1, self%nx    
-                fpost(i-1,j,3)   = one_min_omega*fpre(i,j,3) + omega*ne(i,3)
-            end do
-            do i = 1, self%nx
-                fpost(i,j-1,4)   = one_min_omega*fpre(i,j,4) + omega*ne(i,4)
-            end do
-            do i = 1, self%nx
-                fpost(i+1,j+1,5) = one_min_omega*fpre(i,j,5) + omega*ne(i,5)
-            end do
-            do i = 1, self%nx
-                fpost(i-1,j+1,6) = one_min_omega*fpre(i,j,6) + omega*ne(i,6)
-            end do
-            do i = 1, self%nx
-                fpost(i-1,j-1,7) = one_min_omega*fpre(i,j,7) + omega*ne(i,7)
-            end do
-            do i = 1, self%nx
-                fpost(i+1,j-1,8) = one_min_omega*fpre(i,j,8) + omega*ne(i,8)
-            end do
-        end do
-        !$omp end do
+            real(wp) :: rho(nx), rhoinv, ux(nx), uy(nx), usqr(nx), ne(nx,0:8)
+            integer :: i, j
 
-        end associate
-        !$omp end parallel
+            !$omp parallel shared(fpost,fpre,omega,one_min_omega) private(j,i,rho,rhoinv,ux,uy,usqr,ne)
+            !$omp do schedule(static)
+            do j = 1, ny
+                do i = 1, nx
+                        ! macroscopic variables
+                    rho(i) = sum(fpre(i,j,:))
+                    rhoinv = 1.0_wp/rho(i)
+                    ux(i) = rhoinv*(fpre(i,j,1)+fpre(i,j,5)+fpre(i,j,8)-fpre(i,j,3)-fpre(i,j,6)-fpre(i,j,7))
+                    uy(i) = rhoinv*(fpre(i,j,2)+fpre(i,j,5)+fpre(i,j,6)-fpre(i,j,4)-fpre(i,j,7)-fpre(i,j,8))
+                    usqr(i) = ux(i)*ux(i) + uy(i)*uy(i)
+                end do
+
+                do i = 1, nx
+                        ! non-equlibrium part of the distribution function
+                    ne(i,0)  = 0.5_wp*w(0)*rho(i)*(2.0_wp - inv_cs2*usqr(i))
+                    ne(i,1)  = 0.5_wp*w(1)*rho(i)*(2.0_wp + 2.0_wp*inv_cs2*ux(i) + inv_cs4*ux(i)*ux(i) - inv_cs2*usqr(i))
+                    ne(i,2)  = 0.5_wp*w(2)*rho(i)*(2.0_wp + 2.0_wp*inv_cs2*uy(i) + inv_cs4*uy(i)*uy(i) - inv_cs2*usqr(i))
+                    ne(i,3)  = 0.5_wp*w(3)*rho(i)*(2.0_wp - 2.0_wp*inv_cs2*ux(i) + inv_cs4*ux(i)*ux(i) - inv_cs2*usqr(i))
+                    ne(i,4)  = 0.5_wp*w(4)*rho(i)*(2.0_wp - 2.0_wp*inv_cs2*uy(i) + inv_cs4*uy(i)*uy(i) - inv_cs2*usqr(i))
+                    ne(i,5)  =        w(5)*rho(i)*(1.0_wp + inv_cs2*(ux(i) + uy(i)) + inv_cs4*ux(i)*uy(i) + inv_cs2*usqr(i))
+                    ne(i,6)  =        w(6)*rho(i)*(1.0_wp - inv_cs2*(ux(i) - uy(i)) - inv_cs4*ux(i)*uy(i) + inv_cs2*usqr(i))
+                    ne(i,7)  =        w(7)*rho(i)*(1.0_wp - inv_cs2*(ux(i) + uy(i)) + inv_cs4*ux(i)*uy(i) + inv_cs2*usqr(i))
+                    ne(i,8)  =        w(8)*rho(i)*(1.0_wp + inv_cs2*(ux(i) - uy(i)) - inv_cs4*ux(i)*uy(i) + inv_cs2*usqr(i))
+                end do
+
+                        ! perform collide and stream
+                do i = 1, nx
+                    fpost(i,j,0)     = one_min_omega*fpre(i,j,0) + omega*ne(i,0)
+                end do
+                do i = 1, nx
+                    fpost(i+1,j,1)   = one_min_omega*fpre(i,j,1) + omega*ne(i,1)
+                end do
+                do i = 1, nx
+                    fpost(i,j+1,2)   = one_min_omega*fpre(i,j,2) + omega*ne(i,2)
+                end do
+                do i = 1, nx    
+                    fpost(i-1,j,3)   = one_min_omega*fpre(i,j,3) + omega*ne(i,3)
+                end do
+                do i = 1, nx
+                    fpost(i,j-1,4)   = one_min_omega*fpre(i,j,4) + omega*ne(i,4)
+                end do
+                do i = 1, nx
+                    fpost(i+1,j+1,5) = one_min_omega*fpre(i,j,5) + omega*ne(i,5)
+                end do
+                do i = 1, nx
+                    fpost(i-1,j+1,6) = one_min_omega*fpre(i,j,6) + omega*ne(i,6)
+                end do
+                do i = 1, nx
+                    fpost(i-1,j-1,7) = one_min_omega*fpre(i,j,7) + omega*ne(i,7)
+                end do
+                do i = 1, nx
+                    fpost(i+1,j-1,8) = one_min_omega*fpre(i,j,8) + omega*ne(i,8)
+                end do
+            end do
+            !$omp end do
+            !$omp end parallel
+        end subroutine risc_kernel
+
     end subroutine collide_and_stream_risc
 
 
@@ -318,16 +335,11 @@ contains
 
     subroutine prepare_next_step(self)
         class(LatticeD2Q9), intent(inout) :: self
+        real(wp), pointer, contiguous :: ftmp(:,:,:)
 
-        if (self%flag == 0) then
-            self%fpre => f2
-            self%fpost => f1
-            self%flag = 1
-        else
-            self%fpre => f1
-            self%fpost => f2
-            self%flag = 0
-        end if
+        ftmp => self%fpre
+        self%fpre => self%fpost
+        self%fpost => ftmp
 
     end subroutine prepare_next_step
 
@@ -424,30 +436,28 @@ contains
 
         associate(fpost => self%fpost, fpre => self%fpre, nx => self%nx, ny => self%ny)
 
+        ! do x = 1, nx
+        do concurrent (x = 1:nx)
             ! top wall
-        do x = 1, nx
             rho = sum(fpre(x,ny,:))
             fpost(x,ny,4) = fpost(x,ny+1,2)
             fpost(x,ny,7) = fpost(x+1,ny+1,5) - 2.0_wp*inv_cs2*w(7)*rho*uwall
             fpost(x,ny,8) = fpost(x-1,ny+1,6) + 2.0_wp*inv_cs2*w(8)*rho*uwall
-        end do
 
             ! bottom wall
-        do x = 1, nx
             fpost(x,1,2) = fpost(x,  0,4)
             fpost(x,1,6) = fpost(x+1,0,8)
             fpost(x,1,5) = fpost(x-1,0,7)
         end do
-        
+
+        ! do y = 1, ny
+        do concurrent (y = 1:ny)
             ! left wall
-        do y = 1, ny
             fpost(1,y,1) = fpost(0,y  ,3)
             fpost(1,y,5) = fpost(0,y-1,7)
             fpost(1,y,8) = fpost(0,y+1,6)
-        end do
 
             ! right wall
-        do y = 1, ny
             fpost(nx,y,3) = fpost(nx+1,y  ,1)
             fpost(nx,y,6) = fpost(nx+1,y-1,8)
             fpost(nx,y,7) = fpost(nx+1,y+1,5)
