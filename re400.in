@@ -1,0 +1,12 @@
+folder re1000_121
+reynolds 1000.00
+size 121
+uwall 0.01
+magic 0.250
+tmax 10000000
+tplot 10000
+tconv 1000
+conv_tol 1e-8
+stream_nconv 10000
+stream_tol 1e-6
+stream_omega 1.20
